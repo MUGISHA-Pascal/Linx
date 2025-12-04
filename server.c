@@ -7,6 +7,8 @@
 #include <pthread.h>
 #include <time.h>
 #include <stdarg.h>
+#include <ifaddrs.h>
+#include <netdb.h>
 
 // ANSI color codes
 #define COLOR_RED     "\x1b[31m"
@@ -98,7 +100,30 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
+    // Get and display server IP addresses
+    struct ifaddrs *ifaddr, *ifa;
+    char host[NI_MAXHOST];
+    
     log_message(COLOR_GREEN, "Server started and listening on port %d", PORT);
+    log_message(COLOR_GREEN, "Available network interfaces:");
+    
+    if (getifaddrs(&ifaddr) == -1) {
+        perror("getifaddrs");
+    } else {
+        for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+            if (ifa->ifa_addr == NULL) continue;
+            
+            int family = ifa->ifa_addr->sa_family;
+            if (family == AF_INET) {  // IPv4
+                int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
+                                  host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+                if (s == 0 && strcmp(host, "127.0.0.1") != 0) {
+                    log_message(COLOR_GREEN, "- %s: %s", ifa->ifa_name, host);
+                }
+            }
+        }
+        freeifaddrs(ifaddr);
+    }
 
     while (1) {
         // Accept new connection

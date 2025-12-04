@@ -81,7 +81,14 @@ void *receive_handler(void *arg) {
     return NULL;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    char server_ip[16] = "127.0.0.1";  // Default to localhost
+    
+    // Check for command-line arguments
+    if (argc > 1) {
+        strncpy(server_ip, argv[1], sizeof(server_ip) - 1);
+        server_ip[sizeof(server_ip) - 1] = '\0';
+    }
     struct sockaddr_in server_addr;
     char message[BUFFER_SIZE];
     pthread_t recv_thread;
@@ -107,14 +114,14 @@ int main() {
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
 
-    if (inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) <= 0) {
         fprintf(stderr, COLOR_RED "Invalid address / Address not supported" COLOR_RESET "\n");
         close(sock);
         return EXIT_FAILURE;
     }
 
     // Connect to server
-    printf("Connecting to server...\n");
+    printf("Connecting to %s...\n", server_ip);
     if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror(COLOR_RED "Connection failed" COLOR_RESET);
         close(sock);
