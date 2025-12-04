@@ -25,10 +25,106 @@
 #define MAX_USERNAME 32
 
 // Structure to pass multiple arguments to the thread
-typedef struct {
+typedef struct client_node {
     int socket;
     char username[MAX_USERNAME];
-} client_info_t;
+    struct client_node *next;
+} client_node_t;
+
+client_node_t *clients = NULL;
+pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Emoji mapping
+const char *emoji_map[][2] = {
+    {":)", "😊"}, {":(", "😞"}, {":D", "😃"}, {";)", "😉"}, {":P", "😛"},
+    {":O", "😮"}, {":/", "😕"}, {"<3", "❤️"}, {":heart:", "❤️"}, {":thumbsup:", "👍"},
+    {"lol", "😂"}, {"rofl", "🤣"}, {"wink", "😉"}, {"cool", "😎"}, {"cry", "😢"},
+    {NULL, NULL}
+};
+
+// Function to replace text emojis with Unicode emojis
+void replace_emojis(char *message) {
+    char temp[BUFFER_SIZE * 2] = {0};
+    char *pos = message;
+    char *temp_pos = temp;
+    int i;
+
+    while (*pos) {
+        int replaced = 0;
+        for (i = 0; emoji_map[i][0] != NULL; i++) {
+            size_t emoji_len = strlen(emoji_map[i][0]);
+            if (strncmp(pos, emoji_map[i][0], emoji_len) == 0) {
+                size_t emoji_utf8_len = strlen(emoji_map[i][1]);
+                strncpy(temp_pos, emoji_map[i][1], emoji_utf8_len);
+                temp_pos += emoji_utf8_len;
+                pos += emoji_len;
+                replaced = 1;
+                break;
+            }
+        }
+        if (!replaced) {
+            *temp_pos++ = *pos++;
+        }
+    }
+    *temp_pos = '\0';
+    strncpy(message, temp, BUFFER_SIZE - 1);
+    message[BUFFER_SIZE - 1] = '\0';
+}
+
+// Function to broadcast message to all clients except sender
+void broadcast_message(const char *message, int sender_socket) {
+    pthread_mutex_lock(&clients_mutex);
+    client_node_t *tmp = clients;
+    while (tmp != NULL) {
+        if (tmp->socket != sender_socket) {
+            send(tmp->socket, message, strlen(message), 0);
+        }
+        tmp = tmp->next;
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+// Function to send private message to a specific user
+void send_private_message(const char *recipient, const char *message, const char *sender) {
+    pthread_mutex_lock(&clients_mutex);
+    client_node_t *tmp = clients;
+    char private_msg[BUFFER_SIZE + MAX_USERNAME + 10];
+    
+    snprintf(private_msg, sizeof(private_msg), "[PM from %s] %s", sender, message);
+    
+    while (tmp != NULL) {
+        if (strcasecmp(tmp->username, recipient) == 0) {
+            send(tmp->socket, private_msg, strlen(private_msg), 0);
+            break;
+        }
+        tmp = tmp->next;
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+// Function to add client to the list
+void add_client(client_node_t *client) {
+    pthread_mutex_lock(&clients_mutex);
+    client->next = clients;
+    clients = client;
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+// Function to remove client from the list
+void remove_client(int socket) {
+    pthread_mutex_lock(&clients_mutex);
+    client_node_t **current = &clients;
+    while (*current) {
+        client_node_t *entry = *current;
+        if (entry->socket == socket) {
+            *current = entry->next;
+            free(entry);
+            break;
+        }
+        current = &entry->next;
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
 
 // Function declarations
 void *handle_client(void *client_info);
@@ -134,19 +230,20 @@ int main() {
         }
 
         // Allocate memory for client info
-        client_info_t *client_info = malloc(sizeof(client_info_t));
-        if (!client_info) {
+        client_node_t *client = malloc(sizeof(client_node_t));
+        if (!client) {
             log_message(COLOR_RED, "Memory allocation failed");
             close(new_socket);
             continue;
         }
         
-        client_info->socket = new_socket;
+        client->socket = new_socket;
+        client->next = NULL;
         
         // Start a new thread for the client
-        if (pthread_create(&thread_id, NULL, handle_client, (void *)client_info) < 0) {
+        if (pthread_create(&thread_id, NULL, handle_client, (void *)client) < 0) {
             log_message(COLOR_RED, "Could not create thread");
-            free(client_info);
+            free(client);
             close(new_socket);
         } else {
             pthread_detach(thread_id); // Detach the thread
@@ -159,45 +256,75 @@ int main() {
 }
 
 void *handle_client(void *client_info_ptr) {
-    client_info_t *client_info = (client_info_t *)client_info_ptr;
-    int sock = client_info->socket;
+    client_node_t *client = (client_node_t *)client_info_ptr;
+    int sock = client->socket;
     char buffer[BUFFER_SIZE];
     ssize_t read_size;
     
     // Get client's username
-    if ((read_size = recv(sock, client_info->username, MAX_USERNAME - 1, 0)) <= 0) {
+    if ((read_size = recv(sock, client->username, MAX_USERNAME - 1, 0)) <= 0) {
         log_message(COLOR_RED, "Failed to get username from client");
         goto cleanup;
     }
-    client_info->username[read_size] = '\0';
+    client->username[read_size] = '\0';
     
-    log_message(COLOR_GREEN, "%s has joined the chat", client_info->username);
+    // Add client to the list
+    add_client(client);
+    
+    // Notify all clients about the new user
+    char join_msg[BUFFER_SIZE];
+    snprintf(join_msg, sizeof(join_msg), "%s%s has joined the chat%s", COLOR_GREEN, client->username, COLOR_RESET);
+    broadcast_message(join_msg, sock);
+    
+    log_message(COLOR_GREEN, "%s has joined the chat", client->username);
     
     // Main message loop
     while ((read_size = recv(sock, buffer, BUFFER_SIZE - 1, 0)) > 0) {
         buffer[read_size] = '\0';
         
-        // Log the received message
-        log_message(COLOR_RESET, "%s: %s", client_info->username, buffer);
-        
-        // Send acknowledgment back to client
-        char ack_msg[BUFFER_SIZE + MAX_USERNAME + 10];
-        snprintf(ack_msg, sizeof(ack_msg), "[%s] %s", client_info->username, buffer);
-        if (send(sock, ack_msg, strlen(ack_msg), 0) < 0) {
-            log_message(COLOR_RED, "Failed to send message to client");
-            break;
+        // Check for private message command
+        if (strncmp(buffer, "/msg ", 5) == 0) {
+            char *recipient = buffer + 5;
+            char *message = strchr(recipient, ' ');
+            
+            if (message) {
+                *message++ = '\0'; // Split recipient and message
+                replace_emojis(message);
+                send_private_message(recipient, message, client->username);
+                
+                // Send confirmation to sender
+                char confirm_msg[BUFFER_SIZE];
+                snprintf(confirm_msg, sizeof(confirm_msg), "[PM to %s] %s", recipient, message);
+                send(sock, confirm_msg, strlen(confirm_msg), 0);
+            }
+        } else {
+            // Process emojis in the message
+            replace_emojis(buffer);
+            
+            // Log the received message
+            log_message(COLOR_RESET, "%s: %s", client->username, buffer);
+            
+            // Broadcast to all clients
+            char broadcast_msg[BUFFER_SIZE + MAX_USERNAME + 10];
+            snprintf(broadcast_msg, sizeof(broadcast_msg), "[%s] %s", client->username, buffer);
+            broadcast_message(broadcast_msg, sock);
         }
     }
     
     // Client disconnected
     if (read_size == 0) {
-        log_message(COLOR_YELLOW, "%s has left the chat", client_info->username);
+        log_message(COLOR_YELLOW, "%s has left the chat", client->username);
+        char leave_msg[BUFFER_SIZE];
+        snprintf(leave_msg, sizeof(leave_msg), "%s%s has left the chat%s", 
+                COLOR_YELLOW, client->username, COLOR_RESET);
+        broadcast_message(leave_msg, sock);
     } else if (read_size == -1) {
-        log_message(COLOR_RED, "Error receiving data from %s", client_info->username);
+        log_message(COLOR_RED, "Error receiving data from %s", client->username);
     }
     
 cleanup:
+    remove_client(sock);
     close(sock);
-    free(client_info);
+    free(client);
     return NULL;
 }

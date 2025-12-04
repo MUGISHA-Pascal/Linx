@@ -29,6 +29,44 @@ char username[MAX_USERNAME];
 void *receive_handler(void *arg);
 void set_terminal_mode(int enable);
 void print_help();
+void replace_emojis(char *message);
+
+// Emoji mapping
+const char *emoji_map[][2] = {
+    {":)", "😊"}, {":(", "😞"}, {":D", "😃"}, {";)", "😉"}, {":P", "😛"},
+    {":O", "😮"}, {":/", "😕"}, {"<3", "❤️"}, {":heart:", "❤️"}, {":thumbsup:", "👍"},
+    {"lol", "😂"}, {"rofl", "🤣"}, {"wink", "😉"}, {"cool", "😎"}, {"cry", "😢"},
+    {NULL, NULL}
+};
+
+// Function to replace text emojis with Unicode emojis
+void replace_emojis(char *message) {
+    char temp[BUFFER_SIZE * 2] = {0};
+    char *pos = message;
+    char *temp_pos = temp;
+    int i;
+
+    while (*pos) {
+        int replaced = 0;
+        for (i = 0; emoji_map[i][0] != NULL; i++) {
+            size_t emoji_len = strlen(emoji_map[i][0]);
+            if (strncasecmp(pos, emoji_map[i][0], emoji_len) == 0) {
+                size_t emoji_utf8_len = strlen(emoji_map[i][1]);
+                strncpy(temp_pos, emoji_map[i][1], emoji_utf8_len);
+                temp_pos += emoji_utf8_len;
+                pos += emoji_len;
+                replaced = 1;
+                break;
+            }
+        }
+        if (!replaced) {
+            *temp_pos++ = *pos++;
+        }
+    }
+    *temp_pos = '\0';
+    strncpy(message, temp, BUFFER_SIZE - 1);
+    message[BUFFER_SIZE - 1] = '\0';
+}
 
 // Set terminal to raw mode or back to normal
 void set_terminal_mode(int enable) {
@@ -54,7 +92,12 @@ void print_help() {
     printf("/help - Show this help message\n");
     printf("/exit - Exit the chat\n");
     printf("/clear - Clear the screen\n");
-    printf("/users - Show connected users (if supported by server)\n");
+    printf("/users - Show connected users\n");
+    printf("/msg <username> <message> - Send private message\n");
+    printf("\n" COLOR_YELLOW "=== Emoji Shortcuts ===" COLOR_RESET "\n");
+    printf(":) 😊  :( 😞  :D 😃  ;) 😉  :P 😛\n");
+    printf(":O 😮  :/ 😕  <3 ❤️  lol 😂  rofl 🤣\n");
+    printf("wink 😉  cool 😎  cry 😢  :thumbsup: 👍\n");
     printf("\n");
 }
 
@@ -194,10 +237,19 @@ int main(int argc, char *argv[]) {
                 username[MAX_USERNAME - 1] = '\0';
                 printf("\r\33[2K" COLOR_GREEN "Changed username to: %s" COLOR_RESET "\n", username);
                 continue;
+            } else if (strncmp(message, "/msg ", 5) == 0) {
+                // Process private message (server will handle the rest)
+                replace_emojis(message);
+            } else if (strcmp(message, "/users") == 0) {
+                printf("\r\33[2K" COLOR_YELLOW "User list is shown when users join/leave" COLOR_RESET "\n");
+                continue;
             } else {
                 printf("\r\33[2K" COLOR_YELLOW "Unknown command. Type /help for a list of commands." COLOR_RESET "\n");
                 continue;
             }
+        } else {
+            // Process emojis in regular messages
+            replace_emojis(message);
         }
         
         // Send message to server
