@@ -92,8 +92,9 @@ void print_help() {
     printf("/help - Show this help message\n");
     printf("/exit - Exit the chat\n");
     printf("/clear - Clear the screen\n");
-    printf("/users - Show connected users\n");
+    printf("/users or /list - Show connected users\n");
     printf("/msg <username> <message> - Send private message\n");
+    printf("/nick <new_username> - Change your username\n");
     printf("\n" COLOR_YELLOW "=== Emoji Shortcuts ===" COLOR_RESET "\n");
     printf(":) 😊  :( 😞  :D 😃  ;) 😉  :P 😛\n");
     printf(":O 😮  :/ 😕  <3 ❤️  lol 😂  rofl 🤣\n");
@@ -240,9 +241,9 @@ int main(int argc, char *argv[]) {
             } else if (strncmp(message, "/msg ", 5) == 0) {
                 // Process private message (server will handle the rest)
                 replace_emojis(message);
-            } else if (strcmp(message, "/users") == 0) {
-                printf("\r\33[2K" COLOR_YELLOW "User list is shown when users join/leave" COLOR_RESET "\n");
-                continue;
+            } else if (strcmp(message, "/users") == 0 || strcmp(message, "/list") == 0) {
+                // Send user list request to server
+                replace_emojis(message);
             } else {
                 printf("\r\33[2K" COLOR_YELLOW "Unknown command. Type /help for a list of commands." COLOR_RESET "\n");
                 continue;
