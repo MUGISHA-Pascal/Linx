@@ -102,6 +102,31 @@ void send_private_message(const char *recipient, const char *message, const char
     pthread_mutex_unlock(&clients_mutex);
 }
 
+// Function to send list of connected users to a specific client
+void send_user_list(int socket) {
+    pthread_mutex_lock(&clients_mutex);
+    client_node_t *tmp = clients;
+    char user_list[BUFFER_SIZE * 2] = {0};
+    int count = 0;
+    
+    strcat(user_list, COLOR_CYAN "=== Connected Users ===" COLOR_RESET "\n");
+    
+    while (tmp != NULL) {
+        strcat(user_list, "- ");
+        strcat(user_list, tmp->username);
+        strcat(user_list, "\n");
+        count++;
+        tmp = tmp->next;
+    }
+    
+    char footer[128];
+    snprintf(footer, sizeof(footer), COLOR_CYAN "Total: %d user(s)" COLOR_RESET, count);
+    strcat(user_list, footer);
+    
+    send(socket, user_list, strlen(user_list), 0);
+    pthread_mutex_unlock(&clients_mutex);
+}
+
 // Function to add client to the list
 void add_client(client_node_t *client) {
     pthread_mutex_lock(&clients_mutex);
@@ -282,8 +307,12 @@ void *handle_client(void *client_info_ptr) {
     while ((read_size = recv(sock, buffer, BUFFER_SIZE - 1, 0)) > 0) {
         buffer[read_size] = '\0';
         
+        // Check for user list command
+        if (strcmp(buffer, "/users") == 0 || strcmp(buffer, "/list") == 0) {
+            send_user_list(sock);
+        }
         // Check for private message command
-        if (strncmp(buffer, "/msg ", 5) == 0) {
+        else if (strncmp(buffer, "/msg ", 5) == 0) {
             char *recipient = buffer + 5;
             char *message = strchr(recipient, ' ');
             
@@ -304,9 +333,9 @@ void *handle_client(void *client_info_ptr) {
             // Log the received message
             log_message(COLOR_RESET, "%s: %s", client->username, buffer);
             
-            // Broadcast to all clients
-            char broadcast_msg[BUFFER_SIZE + MAX_USERNAME + 10];
-            snprintf(broadcast_msg, sizeof(broadcast_msg), "[%s] %s", client->username, buffer);
+            // Broadcast to all clients with timestamp
+            char broadcast_msg[BUFFER_SIZE + MAX_USERNAME + 32];
+            snprintf(broadcast_msg, sizeof(broadcast_msg), "[%s %s] %s", get_current_time(), client->username, buffer);
             broadcast_message(broadcast_msg, sock);
         }
     }

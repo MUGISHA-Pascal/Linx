@@ -65,8 +65,9 @@ On a different machine (replace with server's IP):
 - `/help` - Show all available commands
 - `/exit` - Leave the chat
 - `/clear` - Clear the screen
-- `/users` - Show connected users
+- `/users` or `/list` - Show all connected users
 - `/msg <username> <message>` - Send a private message
+- `/nick <new_username>` - Change your username
 
 ### Emoji Shortcuts
 
